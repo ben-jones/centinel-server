@@ -5,7 +5,10 @@
 #
 # verifyServer.py: unit tests for the centinel server API
 
+import json
+import os
 import requests
+import socket
 import tempfile
 import threading
 import unittest
@@ -28,12 +31,19 @@ class TestRESTAPI(unittest.TestCase):
 
         """
         fp, temp_file = tempfile.mkstemp()
-        fp.close()
+        os.close(fp)
         cls.db_file = temp_file
-        db_uri = 'sqlite:///%s' % (tempFile)
-        app.config['SQLALCHEMY_DATABASE_URI'] = db_uri
-        db.create_all()
-        cls.server_thread = threading.Thread(target=app.run)
+        db_uri = 'sqlite:///%s' % (temp_file)
+        server.app.config['SQLALCHEMY_DATABASE_URI'] = db_uri
+        server.db.create_all()
+
+        cls.server_ip = "127.0.0.1"
+        cls.server_port = 5000
+        cls.server_url = "".join(["http://", cls.server_ip, ":",
+                                  str(cls.server_port)])
+        kargs = {'host': cls.server_ip, 'port': cls.server_port}
+        cls.server_thread = threading.Thread(target=server.app.run,
+                                             kwargs=kargs)
         cls.server_thread.daemon = True
         cls.server_thread.start()
 
@@ -43,8 +53,28 @@ class TestRESTAPI(unittest.TestCase):
 
         os.remove(cls.db_file)
 
-    def test_recommended_version(self):
+    def test_not_found(self):
+        r = requests.get(self.server_url + "/this-is-not/a-real-url")
+        self.assertEqual(r.status_code, 404)
+
+    def test_bad_request(self):
         pass
+        # TODO: figure out why we can't connect to the socket
+        # sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        # sock.connect((self.server_ip, self.server_port))
+        # sock.send("asdlfkjas;dlfjas;dlfjsa;dlfj;ladskfj\r\n\r\n")
+        # received = sock.recv(2048)
+
+    def test_unauthorized(self):
+        r = requests.get(self.server_url + "/results")
+        self.assertEqual(r.status_code, 401)
+
+    def test_recommended_version(self):
+        version = "1.2.3.4.5.6.7.8.9"
+        server.config.recommended_version = version
+        r = requests.get(self.server_url + "/version")
+        content = json.loads(r.text)
+        self.assertEqual(content['version'], version)
 
     def test_experiments(self):
         pass
