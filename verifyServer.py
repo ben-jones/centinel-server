@@ -30,6 +30,7 @@ class TestRESTAPI(unittest.TestCase):
         4) create experiments to sync to the client
 
         """
+        # create a fresh db
         fp, temp_file = tempfile.mkstemp()
         os.close(fp)
         cls.db_file = temp_file
@@ -37,6 +38,7 @@ class TestRESTAPI(unittest.TestCase):
         server.app.config['SQLALCHEMY_DATABASE_URI'] = db_uri
         server.db.create_all()
 
+        # setup the server
         cls.server_ip = "127.0.0.1"
         cls.server_port = 5000
         cls.server_url = "".join(["http://", cls.server_ip, ":",
@@ -47,11 +49,61 @@ class TestRESTAPI(unittest.TestCase):
         cls.server_thread.daemon = True
         cls.server_thread.start()
 
+        # specify the user we will test with even though we don't
+        # actually create the user here
+        cls.username = "testy"
+        cls.password = "testy"
+        cls.auth = (cls.username, cls.password)
+
+        # create directories to store the testing experiments,
+        # results, etc.
+        cls.home_dir = os.path.abspath("test")
+        server.config.centinel_home = cls.home_dir
+        cls.experiments_dir = os.path.join(cls.home_dir, "experiments")
+        cls.client_experiments_dir = os.path.join(cls.experiments_dir,
+                                                  cls.username)
+        server.config.experiments_dir = cls.experiments_dir
+        cls.results_dir = os.path.join(cls.home_dir, "results")
+        cls.client_results_dir = os.path.join(cls.results_dir,
+                                                  cls.username)
+        server.config.results_dir = cls.results_dir
+        cls.log_dir = os.path.join(cls.home_dir, "logs")
+        cls.client_log_dir = os.path.join(cls.log_dir,
+                                          cls.username)
+        server.config.log_dir = cls.log_dir
+        dirs = [cls.home_dir, cls.experiments_dir,
+                cls.results_dir, cls.log_dir]
+        for directory in dirs:
+            if not os.path.exists(directory):
+                os.makedirs(directory)
+
+        # create a user to test with 
+        # Note: the fact that this username and password is crap says
+        # nothing about the security of our system because the client
+        # generates these as 64 character, cryptographically random
+        # values
+        payload = {'username': cls.username, 'password': cls.password}
+        headers = {'content-type': 'application/json'}
+        r = requests.post(cls.server_url + "/register",
+                          data=json.dumps(payload), headers=headers)
+        r.raise_for_status()
+
     @classmethod
     def tearDownClass(cls):
         """tear down some of the state created in setUpClass"""
 
         os.remove(cls.db_file)
+
+    def get_request(self, path, payload, headers, auth):
+        r = requests.get(self.server_url + path, headers=headers,
+                         payload=json.dumps(payload), auth=auth)
+        r.raise_for_status()
+        return r.content
+    
+    def post_request(self, path, payload, headers):
+        r = requests.post(self.server_url + path, headers=headers,
+                          payload=json.dumps(payload), auth=auth)
+        r.raise_for_status()
 
     def test_not_found(self):
         r = requests.get(self.server_url + "/this-is-not/a-real-url")
@@ -75,6 +127,23 @@ class TestRESTAPI(unittest.TestCase):
         r = requests.get(self.server_url + "/version")
         content = json.loads(r.text)
         self.assertEqual(content['version'], version)
+
+    def test_submit_result(self):
+        fp, temp_file = tempfile.mkstemp()
+        fp = os.fdopen(fp)
+        testStringy = "".join(["this is a test\n",
+                               json.dumps({'hello':5, 'test':6})])
+        fp.write(testStringy)
+        fp.close()
+        files = {'result': temp_file}
+        r = requests.post(self.server_url, files=files, auth=self.auth)
+        r.raise_for_status()
+
+        res_file = os.path.join(self.client_results_dir,
+                                os.path.split(temp_file)[-1])
+        self.assertTrue(os.path.exists(res_file))
+        with open(res_file, 'r') as f:
+            self.assertEqual(f.read(), testStringy)
 
     def test_experiments(self):
         pass
